@@ -1,78 +1,59 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user
 from app.db.session import get_db
-from app.models.category import Category
-from app.models.product import Product
+from app.models.user import User
 from app.schemas.product import ProductCreate, ProductRead, ProductUpdate
+from app.services import product_service
 
-router = APIRouter(prefix="/products", tags=["products"])
-
-
-def _get_product_or_404(product_id: int, db: Session) -> Product:
-    product = db.get(Product, product_id)
-    if product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return product
-
-
-def _ensure_category_exists(category_id: int, db: Session) -> None:
-    if db.get(Category, category_id) is None:
-        raise HTTPException(status_code=404, detail="Category not found")
+router = APIRouter(prefix="/shops/{shop_id}/products", tags=["products"])
 
 
 @router.get("/", response_model=list[ProductRead])
 def list_products(
+    shop_id: int,
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=20, ge=1, le=100),
-    db: Session = Depends(get_db),
-) -> list[Product]:
-    statement = select(Product).order_by(Product.id).offset(skip).limit(limit)
-    return list(db.scalars(statement).all())
+    limit: int = Query(default=50, ge=1, le=100),
+    session: Session = Depends(get_db),
+):
+    return product_service.list_products(shop_id, session, skip=skip, limit=limit)
 
 
 @router.get("/{product_id}", response_model=ProductRead)
-def get_product(product_id: int, db: Session = Depends(get_db)) -> Product:
-    return _get_product_or_404(product_id, db)
+def get_product(shop_id: int, product_id: int, session: Session = Depends(get_db)):
+    return product_service.get_product(shop_id, product_id, session)
 
 
-@router.post("/", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
-def create_product(payload: ProductCreate, db: Session = Depends(get_db)) -> Product:
-    _ensure_category_exists(payload.category_id, db)
+@router.post("/", response_model=ProductRead, status_code=201)
+def create_product(
+    shop_id: int,
+    data: ProductCreate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+):
+    return product_service.create_product(shop_id, current_user.id, data, session)
 
-    product = Product(**payload.model_dump())
-    db.add(product)
-    db.commit()
-    db.refresh(product)
-    return product
 
-
-@router.put("/{product_id}", response_model=ProductRead)
+@router.patch("/{product_id}", response_model=ProductRead)
 def update_product(
+    shop_id: int,
     product_id: int,
-    payload: ProductUpdate,
-    db: Session = Depends(get_db),
-) -> Product:
-    product = _get_product_or_404(product_id, db)
-    changes = payload.model_dump(exclude_unset=True)
-
-    if "category_id" in changes:
-        if changes["category_id"] is None:
-            raise HTTPException(status_code=422, detail="category_id cannot be null")
-        _ensure_category_exists(changes["category_id"], db)
-
-    for field, value in changes.items():
-        setattr(product, field, value)
-
-    db.commit()
-    db.refresh(product)
-    return product
+    data: ProductUpdate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+):
+    return product_service.update_product(
+        shop_id, product_id, current_user.id, data, session
+    )
 
 
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_product(product_id: int, db: Session = Depends(get_db)) -> Response:
-    product = _get_product_or_404(product_id, db)
-    db.delete(product)
-    db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{product_id}", status_code=204)
+def delete_product(
+    shop_id: int,
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+):
+    product_service.delete_product(shop_id, product_id, current_user.id, session)
+    return Response(status_code=204)

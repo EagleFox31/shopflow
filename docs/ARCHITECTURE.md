@@ -1,104 +1,136 @@
-# ShopFlow architecture
+# ShopFlow Architecture
 
-This document represents the checkpoint reached before starting authentication.
+ShopFlow uses the centralized **service-layer-by-domain** architecture captured during the project's evolution.
 
-## Current scope
+## Why the architecture changed
 
-Implemented at this checkpoint:
+The first version placed business rules, SQLAlchemy calls, validation and HTTP concerns directly in FastAPI routers. That worked while the project was small, but order management quickly turned the router into a business-logic container.
 
-- FastAPI application entry point
-- `/health` endpoint
-- PostgreSQL connection through SQLAlchemy
-- Alembic migrations
-- `Category` model
-- `Product` model
-- Pydantic schemas for create/read/update
-- basic category create/list endpoints
-- full Product CRUD
-- pagination on product listing
-- 404/409/422 error handling for the current domain rules
-- API tests with Pytest and an isolated SQLite database
-
-Not implemented yet:
-
-- User model
-- password hashing
-- register/login
-- JWT access tokens
-- current-user dependency
-- role-based access control
-- cart, orders and payments
-- Docker/CI/CD hardening
-
-## Project tree
+The refactor moved business logic into domain services:
 
 ```text
-shopflow/
-├── app/
-│   ├── main.py
-│   ├── core/
-│   │   └── config.py
-│   ├── db/
-│   │   ├── base.py
-│   │   └── session.py
-│   ├── models/
-│   │   ├── category.py
-│   │   └── product.py
-│   ├── schemas/
-│   │   ├── category.py
-│   │   └── product.py
-│   └── api/
-│       └── routes/
-│           ├── health.py
-│           ├── categories.py
-│           └── products.py
-├── alembic/
-│   ├── env.py
-│   └── versions/
-│       └── 20260905_0001_create_categories_and_products.py
-├── tests/
-│   ├── conftest.py
-│   ├── test_health.py
-│   └── test_products.py
-├── .env.example
-├── alembic.ini
-├── pyproject.toml
-└── README.md
+Before
+Client → Router [HTTP + validation + business rules + DB access] → Database
+
+After
+Client → Router [HTTP + schema validation]
+              ↓
+          Service layer [business rules + orchestration]
+              ↓
+          SQLAlchemy / Database
 ```
 
-## Request flow
+Routers now translate HTTP into service calls. Services own domain rules and orchestration.
+
+## Domain service layer
 
 ```text
-HTTP request
-    ↓
-FastAPI route
-    ↓
-Pydantic schema validation
-    ↓
-SQLAlchemy Session
-    ↓
-Category / Product model
-    ↓
-PostgreSQL
+app/services/
+├── address_service.py
+├── auth_service.py
+├── cart_service.py
+├── cart_item_service.py
+├── category_service.py
+├── health_service.py
+├── notification_service.py
+├── order_service.py
+├── payment_service.py
+├── product_service.py
+├── role_service.py
+├── shipment_service.py
+├── shop_service.py
+├── shop_admin_service.py
+├── token_service.py
+├── user_service.py
+└── user_role_service.py
 ```
 
-At this stage, CRUD logic intentionally stays close to the routes so the learning path remains easy to follow. A service/repository layer should only be introduced when domain logic becomes complex enough to justify it.
+This is intentionally **one service file per domain**, not one file per use case.
 
-## Next milestone
+## Multi-shop model
 
-Authentication is the next deliberate step:
+A user can own multiple shops and can also administer shops owned by other users.
 
-1. `User` SQLAlchemy model
-2. registration schema and endpoint
-3. password hashing
-4. login endpoint
-5. JWT generation/validation
-6. `get_current_user`
-7. `role` field and admin authorization
-8. protect Product create/update/delete for admins
-
-Suggested commit milestone:
-
-```text
-feat(auth): JWT login + role-based access
+```mermaid
+erDiagram
+    USER ||--o{ SHOP : owns
+    USER ||--o{ SHOP_ADMIN : administers
+    SHOP ||--o{ SHOP_ADMIN : has
+    SHOP ||--o{ CATEGORY : contains
+    SHOP ||--o{ PRODUCT : sells
+    SHOP ||--o{ CART : receives
+    SHOP ||--o{ ORDER : receives
+    USER ||--o{ ADDRESS : has
+    USER ||--o{ CART : owns
+    USER ||--o{ ORDER : places
 ```
+
+All catalog and order-management operations are scoped by `shop_id`. Shop owners have full permissions. Shop admins receive explicit catalog/order/user-management permissions.
+
+## Order service as orchestrator
+
+`order_service.py` is the richest domain service. It coordinates several other services while keeping the router thin.
+
+```mermaid
+flowchart LR
+    U[user_service] --> O[order_service]
+    P[product_service] --> O
+    I[inventory via product stock] --> O
+    Pay[payment_service] --> O
+    S[shipment_service] --> O
+    N[notification_service] --> O
+    Shop[shop_service] --> O
+    O --> DB[(Orders / Items / Status History)]
+```
+
+### Order lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: create_order
+    PENDING --> PAID: payment success
+    PAID --> CONFIRMED: confirm_order
+    CONFIRMED --> SHIPPED: ship_order
+    SHIPPED --> DELIVERED: deliver_order
+    DELIVERED --> RETURNED: return_order
+    PENDING --> CANCELLED: cancel_order
+    PAID --> CANCELLED: cancel_order + refund
+    CONFIRMED --> CANCELLED: cancel_order + refund
+```
+
+Every status transition is written to `order_status_history`.
+
+## Database boundaries
+
+The first migration creates:
+
+- users, roles and user_roles
+- shops and shop_admins
+- addresses
+- categories and products
+- carts and cart_items
+- orders, order_items and order_status_history
+- payments
+- shipments
+
+`OrderItem` stores a product snapshot (`product_name`, `sku`, `unit_price`) so historical orders remain meaningful even if the catalog changes later.
+
+## API contracts
+
+Pydantic schemas live in `app/schemas/`. They are the typed contracts between HTTP routes and services. FastAPI exposes the generated OpenAPI contract at:
+
+- `/docs`
+- `/redoc`
+- `/openapi.json`
+
+The human-readable contract catalogue is in [`API_CONTRACTS.md`](API_CONTRACTS.md).
+
+## Cross-cutting rules
+
+1. Routers stay thin: HTTP, dependency injection, response model, service call.
+2. Domain errors are raised from the service layer and converted to HTTP centrally.
+3. Shop-scoped resources are always validated against the active `shop_id`.
+4. Order state transitions are explicit; callers cannot set `status` directly.
+5. Stock is reserved when an order is created and released on cancellation/return.
+6. Payment and shipping are independent domains coordinated by `order_service`.
+7. Notifications are an infrastructure hook, not a dependency hard-coded into the order domain.
