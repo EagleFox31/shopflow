@@ -78,6 +78,311 @@ stateDiagram-v2
 
 Chaque transition est historisée dans `OrderStatusHistory`. Les données produit sont figées dans `OrderItem`, le stock est réservé lors de la création de la commande et il est restauré en cas d’annulation ou de retour.
 
+## Diagrammes UML
+
+### Diagramme de séquence — passage et traitement d’une commande
+
+Ce diagramme montre le parcours principal depuis l’authentification du client jusqu’à la livraison d’une commande.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    actor Marchand
+    participant API as API FastAPI
+    participant Auth as AuthService
+    participant Panier as CartService
+    participant Produit as ProductService
+    participant Commande as OrderService
+    participant Paiement as PaymentService
+    participant Livraison as ShipmentService
+    participant DB as PostgreSQL
+
+    Client->>API: POST /api/v1/auth/login
+    API->>Auth: authentifier_utilisateur()
+    Auth->>DB: vérifier email et mot de passe
+    DB-->>Auth: utilisateur valide
+    Auth-->>API: access token + refresh token
+    API-->>Client: jetons JWT
+
+    Client->>API: Ajouter un produit au panier
+    API->>Panier: ajouter_article()
+    Panier->>Produit: vérifier disponibilité et stock
+    Produit->>DB: lire le produit dans la boutique
+    DB-->>Produit: produit + stock
+    Produit-->>Panier: disponible
+    Panier->>DB: créer ou mettre à jour le panier
+    DB-->>Panier: panier mis à jour
+    Panier-->>API: panier courant
+    API-->>Client: panier mis à jour
+
+    Client->>API: POST /api/v1/shops/{shop_id}/orders
+    API->>Commande: créer_commande_depuis_panier()
+    Commande->>Panier: récupérer panier actif
+    Panier->>DB: lire panier et articles
+    DB-->>Panier: contenu du panier
+    Panier-->>Commande: panier
+    Commande->>Produit: réserver le stock
+    Produit->>DB: décrémenter le stock
+    DB-->>Produit: stock réservé
+    Commande->>DB: créer Order, OrderItem et historique PENDING
+    DB-->>Commande: commande créée
+    Commande-->>API: commande
+    API-->>Client: 201 Created
+
+    Client->>API: Initier le paiement
+    API->>Paiement: initier_paiement()
+    Paiement->>DB: créer Payment PENDING
+    DB-->>Paiement: paiement créé
+    Paiement-->>API: paiement
+    API-->>Client: paiement en attente
+
+    Marchand->>API: Valider le paiement
+    API->>Paiement: confirmer_paiement()
+    Paiement->>DB: Payment → SUCCESS
+    Paiement->>Commande: marquer_commande_payée()
+    Commande->>DB: ajouter historique PAID
+    DB-->>Commande: commande payée
+    API-->>Marchand: paiement confirmé
+
+    Marchand->>API: Confirmer la commande
+    API->>Commande: confirmer_commande()
+    Commande->>DB: statut CONFIRMED + historique
+    DB-->>Commande: commande confirmée
+    API-->>Marchand: commande confirmée
+
+    Marchand->>API: Expédier la commande
+    API->>Livraison: créer_expédition()
+    Livraison->>DB: créer Shipment
+    Livraison->>Commande: marquer_expédiée()
+    Commande->>DB: statut SHIPPED + historique
+    DB-->>Commande: commande expédiée
+    API-->>Marchand: expédition créée
+
+    Marchand->>API: Confirmer la livraison
+    API->>Commande: livrer_commande()
+    Commande->>DB: statut DELIVERED + historique
+    DB-->>Commande: commande livrée
+    API-->>Marchand: livraison confirmée
+```
+
+### Diagramme de classes — modèle métier principal
+
+```mermaid
+classDiagram
+    class User {
+        +int id
+        +string email
+        +string full_name
+        +string hashed_password
+        +bool is_active
+    }
+
+    class Role {
+        +int id
+        +string name
+        +string description
+    }
+
+    class UserRole {
+        +int id
+        +int user_id
+        +int role_id
+    }
+
+    class Shop {
+        +int id
+        +int owner_id
+        +string name
+        +string slug
+        +string currency
+        +bool is_active
+    }
+
+    class ShopAdmin {
+        +int id
+        +int shop_id
+        +int user_id
+        +bool can_manage_catalog
+        +bool can_manage_orders
+        +bool can_manage_admins
+    }
+
+    class Address {
+        +int id
+        +int user_id
+        +string label
+        +string city
+        +string country
+        +bool is_default
+    }
+
+    class Category {
+        +int id
+        +int shop_id
+        +string name
+    }
+
+    class Product {
+        +int id
+        +int shop_id
+        +int category_id
+        +string name
+        +string sku
+        +decimal price
+        +int stock_quantity
+        +bool is_active
+    }
+
+    class Cart {
+        +int id
+        +int user_id
+        +int shop_id
+        +string status
+        +decimal total_amount
+    }
+
+    class CartItem {
+        +int id
+        +int cart_id
+        +int product_id
+        +int quantity
+        +decimal unit_price
+    }
+
+    class Order {
+        +int id
+        +int user_id
+        +int shop_id
+        +int address_id
+        +string status
+        +decimal total_amount
+    }
+
+    class OrderItem {
+        +int id
+        +int order_id
+        +int product_id
+        +string product_name
+        +string sku
+        +decimal unit_price
+        +int quantity
+    }
+
+    class OrderStatusHistory {
+        +int id
+        +int order_id
+        +string status
+        +datetime changed_at
+    }
+
+    class Payment {
+        +int id
+        +int order_id
+        +string provider
+        +string status
+        +decimal amount
+        +string transaction_reference
+    }
+
+    class Shipment {
+        +int id
+        +int order_id
+        +string carrier
+        +string tracking_number
+        +string status
+    }
+
+    User "1" --> "0..*" Shop : possède
+    User "1" --> "0..*" Address : possède
+    User "1" --> "0..*" Cart : utilise
+    User "1" --> "0..*" Order : passe
+    User "1" --> "0..*" UserRole : reçoit
+    Role "1" --> "0..*" UserRole : attribué via
+
+    Shop "1" --> "0..*" ShopAdmin : délègue à
+    User "1" --> "0..*" ShopAdmin : administre
+
+    Shop "1" --> "0..*" Category : contient
+    Shop "1" --> "0..*" Product : vend
+    Shop "1" --> "0..*" Cart : isole
+    Shop "1" --> "0..*" Order : reçoit
+
+    Category "1" --> "0..*" Product : classe
+    Cart "1" --> "0..*" CartItem : contient
+    Product "1" --> "0..*" CartItem : référencé par
+
+    Order "1" --> "1..*" OrderItem : contient
+    Product "1" --> "0..*" OrderItem : référencé par
+    Order "1" --> "1..*" OrderStatusHistory : historise
+    Order "1" --> "0..*" Payment : paiements
+    Order "1" --> "0..1" Shipment : expédition
+    Address "1" --> "0..*" Order : utilisée pour
+```
+
+### Diagramme de cas d’utilisation
+
+```mermaid
+flowchart LR
+    Client[Client]
+    Proprietaire[Propriétaire de boutique]
+    AdminBoutique[Administrateur de boutique]
+    AdminPlateforme[Administrateur plateforme]
+
+    UC1((S'inscrire et se connecter))
+    UC2((Gérer son profil et ses adresses))
+    UC3((Consulter le catalogue))
+    UC4((Gérer son panier))
+    UC5((Passer une commande))
+    UC6((Payer une commande))
+    UC7((Suivre une commande))
+    UC8((Retourner une commande))
+
+    UC9((Créer et gérer ses boutiques))
+    UC10((Déléguer l'administration d'une boutique))
+    UC11((Gérer les catégories))
+    UC12((Gérer les produits et le stock))
+    UC13((Consulter les commandes de la boutique))
+    UC14((Confirmer une commande))
+    UC15((Valider un paiement))
+    UC16((Expédier une commande))
+    UC17((Confirmer une livraison))
+
+    UC18((Gérer les rôles globaux))
+
+    Client --> UC1
+    Client --> UC2
+    Client --> UC3
+    Client --> UC4
+    Client --> UC5
+    Client --> UC6
+    Client --> UC7
+    Client --> UC8
+
+    Proprietaire --> UC1
+    Proprietaire --> UC9
+    Proprietaire --> UC10
+    Proprietaire --> UC11
+    Proprietaire --> UC12
+    Proprietaire --> UC13
+    Proprietaire --> UC14
+    Proprietaire --> UC15
+    Proprietaire --> UC16
+    Proprietaire --> UC17
+
+    AdminBoutique --> UC1
+    AdminBoutique --> UC11
+    AdminBoutique --> UC12
+    AdminBoutique --> UC13
+    AdminBoutique --> UC14
+    AdminBoutique --> UC15
+    AdminBoutique --> UC16
+    AdminBoutique --> UC17
+
+    AdminPlateforme --> UC1
+    AdminPlateforme --> UC18
+```
+
 ## Principaux domaines métier
 
 **Identité** — inscription, connexion, JWT access/refresh, changement de mot de passe et rôles globaux.
