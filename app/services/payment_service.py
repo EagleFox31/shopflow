@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import InvalidStateError, NotFoundError
+from app.core.exceptions import ConflictError, InvalidStateError, NotFoundError
 from app.models.enums import OrderStatus, PaymentStatus
 from app.models.order import Order
 from app.models.payment import Payment
@@ -11,7 +11,7 @@ from app.schemas.payment import PaymentCreate, PaymentSuccess
 
 
 def initiate_payment(order: Order, data: PaymentCreate, session: Session) -> Payment:
-    if order.status not in {OrderStatus.PENDING, OrderStatus.PAID}:
+    if order.status != OrderStatus.PENDING:
         raise InvalidStateError("Payment can only be initiated for a pending order")
     payment = Payment(
         order_id=order.id,
@@ -42,25 +42,39 @@ def mark_payment_success(
         return payment
     if payment.status not in {PaymentStatus.PENDING, PaymentStatus.FAILED}:
         raise InvalidStateError("Payment cannot be marked as successful")
+
+    order = session.get(Order, payment.order_id)
+    if not order:
+        raise NotFoundError("Order not found")
+    if order.status != OrderStatus.PENDING:
+        raise InvalidStateError("Order is no longer awaiting payment")
+
+    duplicate_reference = session.scalar(
+        select(Payment).where(
+            Payment.reference == data.reference,
+            Payment.id != payment.id,
+        )
+    )
+    if duplicate_reference:
+        raise ConflictError("Payment reference already exists")
+
     payment.status = PaymentStatus.SUCCEEDED
     payment.reference = data.reference
     payment.provider_payload = data.provider_payload
     payment.paid_at = datetime.now(timezone.utc)
 
-    order = session.get(Order, payment.order_id)
-    if order and order.status == OrderStatus.PENDING:
-        from app.models.order_status_history import OrderStatusHistory
+    from app.models.order_status_history import OrderStatusHistory
 
-        order.status = OrderStatus.PAID
-        session.add(
-            OrderStatusHistory(
-                order_id=order.id,
-                from_status=OrderStatus.PENDING,
-                to_status=OrderStatus.PAID,
-                note="Payment succeeded",
-                changed_by_user_id=order.customer_id,
-            )
+    order.status = OrderStatus.PAID
+    session.add(
+        OrderStatusHistory(
+            order_id=order.id,
+            from_status=OrderStatus.PENDING,
+            to_status=OrderStatus.PAID,
+            note="Payment succeeded",
+            changed_by_user_id=order.customer_id,
         )
+    )
 
     session.commit()
     session.refresh(payment)
@@ -71,6 +85,8 @@ def mark_payment_failed(payment_id: int, payload: dict | None, session: Session)
     payment = get_payment(payment_id, session)
     if payment.status == PaymentStatus.SUCCEEDED:
         raise InvalidStateError("A successful payment cannot be marked as failed")
+    if payment.status == PaymentStatus.REFUNDED:
+        raise InvalidStateError("A refunded payment cannot be marked as failed")
     payment.status = PaymentStatus.FAILED
     payment.provider_payload = payload
     session.commit()

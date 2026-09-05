@@ -40,7 +40,19 @@ def list_user_shops(user_id: int, session: Session) -> list[Shop]:
 
 def update_shop(shop_id: int, actor_id: int, data: ShopUpdate, session: Session) -> Shop:
     shop = assert_shop_access(shop_id, actor_id, session, owner_only=True)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    new_slug = changes.get("slug")
+    if new_slug is not None and new_slug != shop.slug:
+        duplicate = session.scalar(
+            select(Shop).where(
+                Shop.owner_id == shop.owner_id,
+                Shop.slug == new_slug,
+                Shop.id != shop.id,
+            )
+        )
+        if duplicate:
+            raise ConflictError("You already have a shop with this slug")
+    for field, value in changes.items():
         setattr(shop, field, value)
     session.commit()
     session.refresh(shop)

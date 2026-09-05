@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import Enum, ForeignKey, Numeric
+from sqlalchemy import Enum, ForeignKey, Index, Numeric, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -11,6 +11,16 @@ from app.models.enums import CartStatus
 
 class Cart(TimestampMixin, Base):
     __tablename__ = "carts"
+    __table_args__ = (
+        Index(
+            "uq_active_cart_user_shop",
+            "user_id",
+            "shop_id",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+            sqlite_where=text("status = 'ACTIVE'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

@@ -53,7 +53,19 @@ def update_category(
 ) -> Category:
     shop_service.assert_shop_permission(shop_id, actor_id, "can_manage_catalog", session)
     category = get_category(shop_id, category_id, session)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    new_slug = changes.get("slug")
+    if new_slug is not None and new_slug != category.slug:
+        duplicate = session.scalar(
+            select(Category).where(
+                Category.shop_id == shop_id,
+                Category.slug == new_slug,
+                Category.id != category.id,
+            )
+        )
+        if duplicate:
+            raise ConflictError("Category slug already exists in this shop")
+    for field, value in changes.items():
         setattr(category, field, value)
     session.commit()
     session.refresh(category)

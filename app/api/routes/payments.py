@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.payment import (
@@ -10,7 +11,7 @@ from app.schemas.payment import (
     PaymentRead,
     PaymentSuccess,
 )
-from app.services import order_service, payment_service
+from app.services import order_service, payment_service, shop_service
 
 router = APIRouter(prefix="/orders/{order_id}/payments", tags=["payments"])
 
@@ -26,6 +27,13 @@ def initiate_payment(
     return payment_service.initiate_payment(order, data, session)
 
 
+def _get_payment_for_order(payment_id: int, order_id: int, session: Session):
+    payment = payment_service.get_payment(payment_id, session)
+    if payment.order_id != order_id:
+        raise NotFoundError("Payment not found for this order")
+    return payment
+
+
 @router.post("/{payment_id}/success", response_model=PaymentRead)
 def mark_success(
     order_id: int,
@@ -34,12 +42,11 @@ def mark_success(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_db),
 ):
-    order_service.get_order(order_id, current_user.id, session)
-    payment = payment_service.get_payment(payment_id, session)
-    if payment.order_id != order_id:
-        from app.core.exceptions import NotFoundError
-
-        raise NotFoundError("Payment not found for this order")
+    order = order_service.get_order(order_id, current_user.id, session)
+    shop_service.assert_shop_permission(
+        order.shop_id, current_user.id, "can_manage_orders", session
+    )
+    _get_payment_for_order(payment_id, order_id, session)
     return payment_service.mark_payment_success(payment_id, data, session)
 
 
@@ -51,12 +58,11 @@ def mark_failure(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_db),
 ):
-    order_service.get_order(order_id, current_user.id, session)
-    payment = payment_service.get_payment(payment_id, session)
-    if payment.order_id != order_id:
-        from app.core.exceptions import NotFoundError
-
-        raise NotFoundError("Payment not found for this order")
+    order = order_service.get_order(order_id, current_user.id, session)
+    shop_service.assert_shop_permission(
+        order.shop_id, current_user.id, "can_manage_orders", session
+    )
+    _get_payment_for_order(payment_id, order_id, session)
     return payment_service.mark_payment_failed(
         payment_id, data.provider_payload, session
     )

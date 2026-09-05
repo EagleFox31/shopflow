@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -11,9 +11,10 @@ from app.models.enums import ShipmentStatus
 
 class Shipment(TimestampMixin, Base):
     __tablename__ = "shipments"
+    __table_args__ = (UniqueConstraint("order_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), unique=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
     carrier: Mapped[str] = mapped_column(String(120))
     tracking_number: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True)
     status: Mapped[ShipmentStatus] = mapped_column(

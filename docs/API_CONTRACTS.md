@@ -108,7 +108,7 @@ The pair `(shop_id, sku)` is unique.
 
 ## Cart
 
-Each user has an active cart **per shop**.
+Each user has at most one `ACTIVE` cart **per shop**. The rule is enforced both in the service layer and by a partial unique database index.
 
 - `GET /shops/{shop_id}/cart/`
 - `PUT /shops/{shop_id}/cart/items`
@@ -178,7 +178,7 @@ Clients never directly patch the `status` field. Status changes only through lif
 - `POST /orders/{order_id}/payments/{payment_id}/success`
 - `POST /orders/{order_id}/payments/{payment_id}/failure`
 
-Payment providers are intentionally abstracted. `provider="manual"` works for local development; a real gateway can later be connected without moving payment logic into routers.
+Payment providers are intentionally abstracted. A customer may initiate a payment, but payment success/failure cannot be self-declared by that customer: the current manual-provider endpoints require shop order-management permission. A real provider webhook can later replace that boundary without moving payment logic into routers.
 
 ## Platform roles
 

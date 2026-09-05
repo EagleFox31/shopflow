@@ -131,6 +131,8 @@ The human-readable contract catalogue is in [`API_CONTRACTS.md`](API_CONTRACTS.m
 2. Domain errors are raised from the service layer and converted to HTTP centrally.
 3. Shop-scoped resources are always validated against the active `shop_id`.
 4. Order state transitions are explicit; callers cannot set `status` directly.
-5. Stock is reserved when an order is created and released on cancellation/return.
+5. Stock is reserved when an order is created and released on cancellation/return. Product rows are locked during reservation on databases that support `SELECT ... FOR UPDATE` to reduce overselling races.
 6. Payment and shipping are independent domains coordinated by `order_service`.
 7. Notifications are an infrastructure hook, not a dependency hard-coded into the order domain.
+8. One active cart per user/shop is enforced by a partial unique database index.
+9. PostgreSQL migrations are checked against SQLAlchemy metadata in CI with `alembic check`.

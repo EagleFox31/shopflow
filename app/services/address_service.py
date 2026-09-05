@@ -1,8 +1,9 @@
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.models.address import Address
+from app.models.order import Order
 from app.schemas.address import AddressCreate, AddressUpdate
 
 
@@ -30,7 +31,9 @@ def create_address(user_id: int, data: AddressCreate, session: Session) -> Addre
 def list_addresses(user_id: int, session: Session) -> list[Address]:
     return list(
         session.scalars(
-            select(Address).where(Address.user_id == user_id).order_by(Address.is_default.desc(), Address.id)
+            select(Address)
+            .where(Address.user_id == user_id)
+            .order_by(Address.is_default.desc(), Address.id)
         ).all()
     )
 
@@ -58,6 +61,9 @@ def update_address(
 
 def delete_address(address_id: int, user_id: int, session: Session) -> None:
     address = _get_owned_address(address_id, user_id, session)
+    in_use = session.scalar(select(Order.id).where(Order.address_id == address.id).limit(1))
+    if in_use:
+        raise ConflictError("Cannot delete an address used by an order")
     session.delete(address)
     session.commit()
 
@@ -69,6 +75,7 @@ def set_default_address(address_id: int, user_id: int, session: Session) -> Addr
     )
     address.is_default = True
     session.commit()
+    session.refresh(address)
     return address
 
 

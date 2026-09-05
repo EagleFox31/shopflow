@@ -1,5 +1,7 @@
 # ShopFlow
 
+[![ShopFlow CI](https://github.com/EagleFox31/shopflow/actions/workflows/ci.yml/badge.svg)](https://github.com/EagleFox31/shopflow/actions/workflows/ci.yml)
+
 **A multi-shop commerce backend where one account can own several stores, delegate store administration, manage catalogues, carts, payments and the full order lifecycle.**
 
 ShopFlow was built as a practical Python/FastAPI project and evolved from router-heavy CRUD into a domain-oriented service layer.
@@ -185,6 +187,31 @@ Open:
 - ReDoc: `http://127.0.0.1:8000/redoc`
 - OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
 - Health: `http://127.0.0.1:8000/health`
+
+
+## Quality gates
+
+ShopFlow is not considered merge-ready because a few happy-path tests pass. The CI pipeline validates the backend at several layers:
+
+- Python compilation and Ruff static checks
+- request/response and OpenAPI contract tests
+- authentication, refresh-token and authorization failures
+- multi-shop isolation and delegated shop permissions
+- catalog, address, cart and database uniqueness rules
+- order state-transition, cancellation, payment and return scenarios
+- PostgreSQL 16 migration from an empty database
+- `alembic check` to detect model/migration drift
+- full Alembic downgrade to `base` and re-upgrade to `head`
+- the integration suite against PostgreSQL, not only SQLite
+- a live HTTP E2E scenario against a running Uvicorn process and PostgreSQL
+
+The local fast suite can be run with:
+
+```bash
+poetry run pytest -q
+```
+
+The PostgreSQL/live E2E gate is reproduced automatically by GitHub Actions. See [`docs/TESTING.md`](docs/TESTING.md) for the exact test matrix.
 
 ## API surface
 

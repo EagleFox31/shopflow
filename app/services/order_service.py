@@ -83,7 +83,9 @@ def create_order(
     session.flush()
 
     for cart_item in cart.items:
-        product = product_service.get_product(shop_id, cart_item.product_id, session)
+        product = product_service.get_product(
+            shop_id, cart_item.product_id, session, for_update=True
+        )
         product_service.reserve_stock(product, cart_item.quantity, session)
         session.add(
             OrderItem(

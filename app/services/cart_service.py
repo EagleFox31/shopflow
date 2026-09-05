@@ -6,9 +6,11 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.exceptions import NotFoundError
 from app.models.cart import Cart
 from app.models.enums import CartStatus
+from app.services import shop_service
 
 
 def get_or_create_active_cart(user_id: int, shop_id: int, session: Session) -> Cart:
+    shop_service.get_shop(shop_id, session)
     cart = session.scalar(
         select(Cart)
         .options(selectinload(Cart.items))
@@ -28,6 +30,7 @@ def get_or_create_active_cart(user_id: int, shop_id: int, session: Session) -> C
 
 
 def get_active_cart(user_id: int, shop_id: int, session: Session) -> Cart:
+    shop_service.get_shop(shop_id, session)
     cart = session.scalar(
         select(Cart)
         .options(selectinload(Cart.items))
@@ -66,6 +69,8 @@ def close_cart_after_order(cart: Cart, session: Session) -> None:
 def get_abandoned_carts(session: Session) -> list[Cart]:
     return list(
         session.scalars(
-            select(Cart).where(Cart.status == CartStatus.ABANDONED).order_by(Cart.updated_at.desc())
+            select(Cart)
+            .where(Cart.status == CartStatus.ABANDONED)
+            .order_by(Cart.updated_at.desc())
         ).all()
     )
