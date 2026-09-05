@@ -6,6 +6,8 @@
 
 ShopFlow a été construit comme un projet pratique Python/FastAPI et a évolué d’un CRUD fortement centré sur les routers vers une architecture organisée autour d’une couche de services métier.
 
+> **Tu apprends le backend ?** Commence par **[docs/START_HERE.md](docs/START_HERE.md)**. Le guide te donne les prérequis, l’ordre de lecture du code, les fichiers à étudier et des exercices progressifs pour comprendre ShopFlow sans te perdre dans l’architecture.
+
 ---
 
 ## Ce que modélise ShopFlow
@@ -422,8 +424,10 @@ shopflow/
 ├── alembic/
 │   └── versions/
 ├── docs/
+│   ├── START_HERE.md
 │   ├── ARCHITECTURE.md
-│   └── API_CONTRACTS.md
+│   ├── API_CONTRACTS.md
+│   └── TESTING.md
 ├── scripts/
 │   └── seed_roles.py
 ├── tests/
@@ -534,6 +538,8 @@ L’API est versionnée sous `/api/v1`.
 /orders/{id}/payments/*         cycle de vie des paiements
 /admin/*                        rôles globaux de la plateforme
 ```
+
+Pour apprendre à lire le projet dans le bon ordre, voir **[docs/START_HERE.md](docs/START_HERE.md)**.
 
 Pour la liste complète des requêtes et réponses, voir **[docs/API_CONTRACTS.md](docs/API_CONTRACTS.md)**.
 
