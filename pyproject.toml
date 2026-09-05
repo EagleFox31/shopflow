@@ -20,7 +20,7 @@ argon2-cffi = ">=23.1,<26.0"
 python-multipart = ">=0.0.9,<1.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = ">=8.0,<9.0"
+pytest = ">=8.0,<10.0"
 httpx = ">=0.27,<1.0"
 ruff = ">=0.8,<1.0"
 
@@ -34,3 +34,14 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# Keep the gate focused on correctness-oriented checks. FastAPI legitimately
+# calls Depends()/Query() in default arguments and SQLAlchemy relationships use
+# quoted forward references, so those framework patterns are configured below.
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/models/*.py" = ["F821"]
+"tests/conftest.py" = ["E402"]
